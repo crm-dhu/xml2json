@@ -1,0 +1,16 @@
+target/
+.vscode/
+.metals/
+.idea
+utils/models/
+
+# Vim stuff
+*.swp
+*.swo
+
+# ctags
+.tags
+
+# Mac stuff
+.DS_Store
+
