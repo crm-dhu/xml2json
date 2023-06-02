@@ -1,99 +1,97 @@
 package parser
 
 import (
-	"encoding/xml"
-	"errors"
+	"encoding/json"
 	"fmt"
-	"strings"
+
+	"github.com/beevik/etree"
 )
 
-type FlowMap struct {
-	Unparsed StrToAnyMap `xml:",any"`
+type strMap map[string]any
+
+func ParseXML(xmlStr string) (err error) {
+
+	// data_elements := NewSet("recordLookups", "recordUpdates", "recordCreates", "recordDeletes")
+	// interaction_elements := NewSet("actionCalls", "subflows", "screens")
+	// logic_elements := NewSet("decisions", "assignments", "waits", "loops", "collectionProcessors")
+	// elements := NewSet()
+	// elements.AddSet(data_elements)
+	// elements.AddSet(interaction_elements)
+	// elements.AddSet(logic_elements)
+	// resources := NewSet("variables", "constants", "formulas", "textTemplates", "stages")
+	array_keys := NewSet("actionCalls", "apexPluginCalls", "assignments", "choices", "collectionProcessors",
+		"constants", "decisions", "dynamicChoiceSets", "formulas", "loops", "orchestratedStages",
+		"processMetadataValues", "recordCreates", "recordDeletes", "recordLookups",
+		"recordRollbacks", "recordUpdates", "screens", "stages", "steps", "subflows",
+		"textTemplates", "variables", "waits", "dataTypeMappings", "inputParameters",
+		"outputParameters", "assignmentItems", "conditions", "mapItems", "sortOptions",
+		"rules", "filters", "outputAssignments", "processMetadataValues", "exitActionInputParameters",
+		"exitActionOutputParameters", "exitConditions", "stageSteps", "inputAssignments",
+		"choiceReferences", "assignees", "entryActionInputParameters", "entryActionOutputParameters",
+		"entryConditions", "scheduledPaths", "connectors", "waitEvents")
+
+	var d strMap
+	doc := etree.NewDocument()
+	doc.ReadFromString(xmlStr)
+	root := doc.SelectElement("Flow")
+
+	if err = recursiveParse(root, d, array_keys); err != nil {
+		fmt.Println("Something is wrong")
+		return nil
+	}
+	y, _ := json.Marshal(d)
+	fmt.Println(string(y))
+	return nil
+
 }
 
-// TagMap contains the tag information
-type TagMap struct {
-	XMLName     xml.Name
-	FullContent string `xml:",innerxml"`
-}
+// func ParseXML(xmlStr string) {
+// 	x := map[string]any{"a": 1, "b": map[string]any{"c": 2}, "d": []int{1, 2, 3}}
+// 	y, _ := json.Marshal(x)
+// 	fmt.Println(string(y))
+// 	doc := etree.NewDocument()
+// 	doc.ReadFromString(xmlStr)
+// 	root := doc.SelectElement("Flow")
+// 	for _, e := range root.ChildElements() {
+// 		fmt.Println(e.Tag)
+// 		if len(e.ChildElements()) == 0 {
+// 			fmt.Println(e.Text())
+// 		}
+// 	}
+// }
 
-// StrToAnyMap store tags not handled by Unmarshal in a map, it should be labelled with `xml",any"`
-type StrToAnyMap map[string]string
-
-var (
-	finalMap  = make(map[string]string)
-	separator string
-)
-
-// GetXmlMap accepts a xml string a the first parameter and a separator as the second parameter.
-// Will return a map of xml data where recursive xml tag keys are separated by separator passed as parameter.
-// If processing is unsuccessful xmlMap will be set to nil and err is returned.
-func GetXmlMap(xmlStr string, sep string) (xmlMap map[string]string, err error) {
-	var xmlStructMapMain FlowMap
-	separator = sep
-	err = xml.Unmarshal([]byte("<dummy>"+xmlStr+"</dummy>"), &xmlStructMapMain)
-	if err != nil {
-		return nil, err
+func recursiveParse(root *etree.Element, d strMap, array_keys *Set) (err error) {
+	if root == nil {
+		return nil
 	}
-	if len(xmlStructMapMain.Unparsed) > 1 {
-		return nil, errors.New("wrong XML input")
-	}
-	mainTag := ""
-	for key := range xmlStructMapMain.Unparsed {
-		mainTag = key
-		break
-	}
-	if mainTag == "" {
-		return nil, errors.New("wrong XML input : invalid tag name")
-	}
-	xmlStructMapMain.Unparsed = nil
-	err = xml.Unmarshal([]byte(xmlStr), &xmlStructMapMain)
-	if err != nil {
-		return nil, err
-	}
-	for key := range xmlStructMapMain.Unparsed {
-		fmt.Println(key)
-	}
-	err = recursive(xmlStructMapMain.Unparsed, mainTag)
-	if err != nil {
-		return nil, err
-	}
-	return finalMap, nil
-}
-
-func recursive(unparsed StrToAnyMap, mainTag string) error {
-	for key, value := range unparsed {
-		if len(value) > 0 && key != "" {
-			if strings.Contains(value, "<") {
-				var xmlStructMapRec FlowMap
-				err := xml.Unmarshal([]byte("<"+key+">"+value+"</"+key+">"), &xmlStructMapRec)
-				if err != nil {
-					return err
-				}
-				errRec := recursive(xmlStructMapRec.Unparsed, mainTag+separator+key)
-				if errRec != nil {
-					return errRec
-				}
+	children := root.ChildElements()
+	if len(children) == 1 {
+		if array_keys.Contains(root.Tag) {
+			if _, ok := d[root.Tag]; ok {
+				d[root.Tag] = append(d[root.Tag].([]string), root.Text())
 			} else {
-				if mainTag != "" {
-					finalMap[mainTag+separator+key] = value
-				}
+				d[root.Tag] = []string{root.Text()}
+
 			}
+		} else {
+			d[root.Tag] = root.Text()
 		}
+		return nil
+	}
+	var d1 strMap
+	for _, child := range children {
+		recursiveParse(child, d1, array_keys)
+	}
+	if array_keys.Contains(root.Tag) {
+		if _, ok := d[root.Tag]; ok {
+			d[root.Tag] = append(d[root.Tag].([]any), d1)
+		} else {
+			d[root.Tag] = []any{d1}
+
+		}
+	} else {
+		d[root.Tag] = d1
 	}
 	return nil
-}
 
-func (u *StrToAnyMap) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
-	if *u == nil {
-		*u = StrToAnyMap{}
-	}
-	e := TagMap{}
-	err := d.DecodeElement(&e, &start)
-	if err != nil {
-		return err
-	}
-
-	(*u)[e.XMLName.Local] = e.FullContent
-	return nil
 }
