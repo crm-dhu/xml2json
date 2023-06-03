@@ -1,15 +1,32 @@
 package parser
 
 import (
-	"encoding/json"
-	"fmt"
+	"errors"
 
 	"github.com/beevik/etree"
 )
 
-type strMap map[string]any
+func find_target(jsonElement any, lookup_key string, values []any) []any {
+	switch v := jsonElement.(type) {
+	case map[string]any:
+		for key, value := range v {
+			if key == lookup_key {
+				values = append(values, value)
+			} else {
+				values = find_target(value, lookup_key, values)
+			}
+		}
 
-func ParseXML(xmlStr string) (err error) {
+	case []any:
+		for _, e := range v {
+			values = find_target(e, lookup_key, values)
+		}
+	}
+	return values
+
+}
+
+func Xml2Map(xmlStr string) (jsonMap map[string]any, err error) {
 
 	// data_elements := NewSet("recordLookups", "recordUpdates", "recordCreates", "recordDeletes")
 	// interaction_elements := NewSet("actionCalls", "subflows", "screens")
@@ -30,64 +47,51 @@ func ParseXML(xmlStr string) (err error) {
 		"choiceReferences", "assignees", "entryActionInputParameters", "entryActionOutputParameters",
 		"entryConditions", "scheduledPaths", "connectors", "waitEvents")
 
-	var d strMap
+	d := map[string]any{}
 	doc := etree.NewDocument()
 	doc.ReadFromString(xmlStr)
 	root := doc.SelectElement("Flow")
 
 	if err = recursiveParse(root, d, array_keys); err != nil {
-		fmt.Println("Something is wrong")
-		return nil
+		return nil, errors.New("parsing failed")
 	}
-	y, _ := json.Marshal(d)
-	fmt.Println(string(y))
-	return nil
-
+	return d, nil
 }
 
-// func ParseXML(xmlStr string) {
-// 	x := map[string]any{"a": 1, "b": map[string]any{"c": 2}, "d": []int{1, 2, 3}}
-// 	y, _ := json.Marshal(x)
-// 	fmt.Println(string(y))
-// 	doc := etree.NewDocument()
-// 	doc.ReadFromString(xmlStr)
-// 	root := doc.SelectElement("Flow")
-// 	for _, e := range root.ChildElements() {
-// 		fmt.Println(e.Tag)
-// 		if len(e.ChildElements()) == 0 {
-// 			fmt.Println(e.Text())
-// 		}
-// 	}
-// }
-
-func recursiveParse(root *etree.Element, d strMap, array_keys *Set) (err error) {
+func recursiveParse(root *etree.Element, d map[string]any, array_keys *Set) (err error) {
 	if root == nil {
 		return nil
 	}
 	children := root.ChildElements()
-	if len(children) == 1 {
+	if len(children) == 0 {
 		if array_keys.Contains(root.Tag) {
 			if _, ok := d[root.Tag]; ok {
-				d[root.Tag] = append(d[root.Tag].([]string), root.Text())
+				if leaves, ok := d[root.Tag].([]string); ok {
+					d[root.Tag] = append(leaves, root.Text())
+				} else {
+					errors.New("leaves cannot be converted.")
+				}
 			} else {
 				d[root.Tag] = []string{root.Text()}
-
 			}
 		} else {
 			d[root.Tag] = root.Text()
 		}
 		return nil
 	}
-	var d1 strMap
+	d1 := map[string]any{}
 	for _, child := range children {
 		recursiveParse(child, d1, array_keys)
 	}
 	if array_keys.Contains(root.Tag) {
 		if _, ok := d[root.Tag]; ok {
-			d[root.Tag] = append(d[root.Tag].([]any), d1)
+			if nodes, ok := d[root.Tag].([]any); ok {
+				d[root.Tag] = append(nodes, d1)
+			} else {
+				errors.New("nodes cannot be converted.")
+			}
 		} else {
 			d[root.Tag] = []any{d1}
-
 		}
 	} else {
 		d[root.Tag] = d1
